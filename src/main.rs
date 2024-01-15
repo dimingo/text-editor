@@ -16,6 +16,7 @@ struct Editor {
 enum Message {
     Edit(text_editor::Action),
     Open,
+    New,
     FileOpened(Result<(PathBuf, Arc<String>), Error>),
 }
 
@@ -45,6 +46,14 @@ impl Application for Editor {
         match message {
             Message::Edit(action) => {
                 self.content.edit(action);
+
+                self.error = None;
+                Command::none()
+            }
+            Message::New => {
+                self.path = None;
+                self.content = text_editor::Content::new();
+
                 Command::none()
             }
             Message::Open => {
@@ -64,21 +73,27 @@ impl Application for Editor {
     }
 
     fn view(&self) -> Element<'_, Message> {
-        let controls = row![button("Open").on_press(Message::Open)];
+        let controls = row![ button("New").on_press(Message::New), horizontal_space(3), button("Open").on_press(Message::Open)];
         let input = text_editor(&self.content).on_edit(Message::Edit);
-        let file_path = match self.path.as_deref().and_then(Path::to_str) {
-            Some(path) => text(path).size(14),
-            None => text(""),
+
+
+        let status_bar = {
+            let file_path = if let Some(Error::IO(error)) = self.error.as_ref() {
+                text(error.to_string())
+            } else {
+                match self.path.as_deref().and_then(Path::to_str) {
+                    Some(path) => text(path).size(14),
+                    None => text("New File"),
+                }
+            };
+
+            let position = {
+                let (line, column) = self.content.cursor_position();
+
+                text(format!("{}:{}", line + 1, column + 1))
+            };
+            row![file_path, horizontal_space(Length::Fill), position];
         };
-
-        let position = {
-            let (line, column) = self.content.cursor_position();
-
-            text(format!("{}:{}", line + 1, column + 1))
-        };
-
-
-        let status_bar = row![file_path, horizontal_space(Length::Fill), position];
 
         container(column![controls, input, status_bar].spacing(10)).padding(10).into()
     }
