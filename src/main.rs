@@ -1,8 +1,10 @@
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use iced::{Command, executor, Application, Element, Settings, Theme, Length};
-use iced::widget::{column, horizontal_space, row, container, text, text_editor, button};
+use iced::theme;
+use iced::highlighter::{self, Highlighter};
+use iced::{Command, executor, Application, Element, Settings, Theme, Length, Font};
+use iced::widget::{pick_list, column, horizontal_space, row, container, text, text_editor, button, tooltip};
 // use rfd::MessageLevel::Error;
 
 
@@ -10,6 +12,7 @@ struct Editor {
     path: Option<PathBuf>,
     content: text_editor::Content,
     error: Option<Error>,
+    theme: highlighter::Theme,
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +23,7 @@ enum Message {
     New,
     FileOpened(Result<(PathBuf, Arc<String>), Error>),
     FileSaved(Result<PathBuf, Error>),
+    ThemeSelected(highlighter::Theme),
 }
 
 impl Application for Editor {
@@ -34,6 +38,7 @@ impl Application for Editor {
             path: None,
             content: text_editor::Content::new(),
             error: None,
+            theme: highlighter::Theme::SolarizedDark,
         }, Command::perform(
             load_file(default_file()),
             Message::FileOpened)
@@ -73,7 +78,6 @@ impl Application for Editor {
             }
             Message::FileSaved(Err(error)) => {
                 self.error = Some(error);
-
                 Command::none()
             }
             Message::FileOpened(Ok((path, content))) => {
@@ -86,18 +90,32 @@ impl Application for Editor {
                 self.error = Some(error);
                 Command::none()
             }
+            Message::ThemeSelected(theme) => {
+                self.theme = theme;
+
+                Command::none()
+            }
         }
     }
 
+
     fn view(&self) -> Element<'_, Message> {
         let controls = row![
-            button("New").on_press(Message::New),
-            horizontal_space(4),
-            button("Open").on_press(Message::Open),
-            horizontal_space(4),
-            button("Save").on_press(Message::Save)];
+            action(new_icon(),"New File", Message::New),
+            action(open_icon(),"Open File", Message::Open),
+            action(save_icon(),"Save File",  Message::Save),
+            horizontal_space(Length::Fill),
 
-        let input = text_editor(&self.content).on_edit(Message::Edit);
+            pick_list(highlighter::Theme::ALL,  Some(self.theme), Message::ThemeSelected)
+        ].spacing(10);
+
+        let input = text_editor(&self.content)
+            .on_edit(Message::Edit)
+            .highlight::<Highlighter>(highlighter::Settings {
+                theme: self.theme,
+                extension: self.path.as_ref().and_then(|path| path.extension()?.to_str()).unwrap_or("rs").to_string(),
+            },
+                                      |highlighter, _theme| highlighter.to_format());
         let status_bar = {
             let status = if let Some(Error::IOFailed(error)) = self.error.as_ref() {
                 text(error.to_string())
@@ -122,7 +140,11 @@ impl Application for Editor {
         container(column![controls, input, status_bar].spacing(10)).padding(10).into()
     }
     fn theme(&self) -> Theme {
-        Theme::Dark
+        if self.theme.is_dark() {
+            Theme::Dark
+        } else {
+            Theme::Light
+        }
     }
 }
 
@@ -132,7 +154,11 @@ async fn load_file(path: PathBuf) -> Result<(PathBuf, Arc<String>), Error> {
 }
 
 fn main() -> iced::Result {
-    Editor::run(Settings::default())
+    Editor::run(Settings {
+        default_font: Font::MONOSPACE,
+        fonts: vec![include_bytes!("../font/iced-icons.ttf").as_slice().into()],
+        ..Settings::default()
+    })
 }
 
 
@@ -154,6 +180,29 @@ async fn save_file(path: Option<PathBuf>, content: String) -> Result<PathBuf, Er
 }
 
 
+fn new_icon<'a>() -> Element<'a, Message> {
+    icon('\u{E800}')
+}
+
+fn save_icon<'a>() -> Element<'a, Message> {
+    icon('\u{E801}')
+}
+
+fn open_icon<'a>() -> Element<'a, Message> {
+    icon('\u{F115}')
+}
+
+fn icon<'a, Message>(codepoint: char) -> Element<'a, Message> {
+    const ICON_FONT: Font = Font::with_name("iced-icons");
+    text(codepoint).font(ICON_FONT).into()
+}
+
+fn action<'a>(content: Element<'a, Message>, label: &'a str, on_press: Message) -> Element<'a, Message> {
+    tooltip(button(container(content).width(20).center_x()).on_press(on_press).padding([5, 5]), label, tooltip::Position::FollowCursor)
+        .style(theme::Container::Box)
+        .into()
+}
+
 fn default_file() -> PathBuf {
     PathBuf::from(format!("{}/src/main.rs", env!("CARGO_MANIFEST_DIR")))
 }
@@ -163,6 +212,4 @@ enum Error {
     DialogClose,
     IOFailed(io::ErrorKind),
 }
-
-
 
